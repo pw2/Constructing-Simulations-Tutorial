@@ -1,0 +1,272 @@
+---
+title: 'Simulations in R Part 3: Group Comparisons via Simulation (simulating t-tests)'
+author: "Patrick Ward"
+date: "7/7/2023"
+output: html_document
+---
+
+## Group Comparisons via Simulation (simulating t-tests)
+
+Now that we have a few of the simulation tools under our belt, we can begin to simulation data and construct models. Our first approach is to work on simulations of the t-test, which is used to compare the mean difference between two groups.
+
+We begin by simulating our two groups.
+
+```{r}
+set.seed(1759)
+grp1 <- rnorm(n = 10,
+              mean = 50,
+              sd = 10)
+
+grp2 <- rnorm(n = 10,
+              mean = 60,
+              sd = 6.25)
+
+## get the summary statistics for both groups
+# sample size
+n_grp1 <- length(grp1)
+n_grp2 <- length(grp2)
+
+# means
+mu_grp1 <- mean(grp1)
+mu_grp2 <- mean(grp2)
+
+# variances
+var_grp1 <- var(grp1)
+var_grp2 <- var(grp2)
+
+# standard deviation
+sd_grp1 <- sd(grp1)
+sd_grp2 <- sd(grp2)
+```
+
+
+Next, we calculate the t-statistic, which is the difference between the two groups means divided by the pooled standard deviation of the two groups.
+
+```{r}
+## pooled SD
+sd_pool <- sqrt(((n_grp1 - 1) * var_grp1 + (n_grp2 - 1) * var_grp2) / (n_grp1 + n_grp2 - 2))
+sd_pool
+
+## Compute t-statistic
+t_stat <- (mu_grp1 - mu_grp2) / (sd_pool * sqrt(1/n_grp1 + 1/n_grp2))
+t_stat
+```
+
+We can use this t-statistic to determine if the difference is significant or not at a desired alpha level, say p < 0.05, by using a t-distribution. We then check our work against R's build in `t.test()` function.
+
+```{r}
+alpha <- 0.05
+df <- n_grp1 + n_grp2 - 2
+
+if(abs(t_stat) > qt(1 - alpha / 2, df, lower.tail = TRUE)){
+  "significant difference"} else {"not a significant difference"} 
+
+# Get p-value
+p_value <- 2*pt(abs(t_stat), df, lower=FALSE)
+p_value
+
+# check work
+t.test(grp1, grp2)
+
+```
+
+
+The group difference is barely significant at the p < 0.05 level. We calculated the t-statistic by hand and got the exact same value as that which was produced by the `t.test()` function.
+
+To make this approach more streamlined, let's create our own t-test function so that all we need to do in the future is pass it a vector of values representing each group's data and get returned the t-statistic.
+
+```{r}
+## t-test function
+t_stat_func <- function(x, y){
+  n_grp1 <- length(x)
+  n_grp2 <- length(y)
+  sd_pool <- sqrt(((n_grp1 - 1) * sd(x)^2 + (n_grp2 - 1) * sd(y)^2) / (n_grp1 + n_grp2 - 2))
+  t_stat <- (mean(x) - mean(y)) / (sd_pool * sqrt(1/n_grp1 + 1/n_grp2))
+  return(t_stat)
+}
+
+## try out the function
+t_stat_func(x = grp1, y = grp2)
+```
+
+
+We only have 10 observations in each of our groups. With such a small sample size, it may be challenging to really know if the difference we observed is real or just some sort of chance/luck occurrence (we will explore sample size issues via simulation in a later blog post). What we can do is use the function we just created and build simulated distributions using the data generating process (mean and SD) of each group to run a Monte Carlo simulations and explore how often we might reject or accept the null hypothesis at an alpha level of p < 0.05.
+
+```{r}
+# Let's set alpha to 0.05
+alpha <- 0.05
+
+# We will run 10,000 simulations
+N_sims <- 1e4
+
+# create an empty vector for storing t-statistics and p-valies
+t_stat <- rep(NA, N_sims)
+p_values <- rep(NA, N_sims)
+
+for(i in 1:N_sims){
+  
+  # simulate population 1
+  grp1_sim <- rnorm(n = n_grp1, mean = mu_grp1, sd = sd_grp1)
+  
+  # simulate group 2
+  grp2_sim <- rnorm(n = n_grp2, mean = mu_grp2, sd = sd_grp2)
+  
+  # compute the t-statistic with our function
+  t_stat[i] <- t_stat_func(grp1_sim, grp2_sim)
+
+  # get degrees of freedom for calculating the p-value
+  df <- n_grp1 + n_grp2 - 2
+  
+  # obtain the p-value
+  p_value[i] <- 2*pt(abs(t_stat[i]), df, lower=FALSE)
+}
+
+par(mfrow = c(1, 2))
+hist(abs(t_stat),
+     main = "T-Statistic Distribution")
+abline(v = mean(abs(t_stat)),
+       col = "red",
+       lwd = 3,
+       lty = 2)
+hist(p_value,
+     main = "p-value Distribution")
+abline(v = 0.05,
+       col = "red",
+       lwd = 3,
+       lty = 2)
+
+# What percentage of times did we reject the null?
+mean(p_value < 0.05)
+
+```
+
+
+We could have saved a lot of lines of code and instead used the `replicate()` function and run 10,000 simulations of the t-test between the two groups.
+
+```{r}
+t_test <- function(){
+  grp1 <- rnorm(n = n_grp1, mean = mu_grp1, sd = sd_grp1)
+  grp2 <- rnorm(n = n_grp2, mean = mu_grp2, sd = sd_grp2)
+  t_stat_func(grp1, grp2)
+}
+
+
+# Instead of a for loop, we will use the replicate() function to run this 10,000 times
+t_stat_vector <- replicate(n = 10000,
+                           t_test())
+
+head(t_stat_vector)
+hist(abs(t_stat_vector),
+     main = "T-Test Simulation using replicate()",
+     xlab = "T-Statistic")
+```
+
+
+##### Simulating Data from Studies
+
+We can use a similar approach to simulating data to help us further explore data contained in studies we read. Most studies do not provide full data sets but do provide necessary summary statistics (e.g., sample size, mean, standard deviation, standard errors, confidence intervals, etc.), allowing us to use the data generating processes to simulate the study.
+
+I was reading a 2010 paper from Saenz et al., Knee isokinetic test-retest: A multicenter knee isokinetic test-retest study of a fatigue protocol (Eur J Phys Rehabil Med), where they authors were conducing a series of test-retest protocols using a biodex. The tables in the paper lay out the information required to simulate the study. For example, in Table 1, the authors' provide the mean, median, and standard deviation for all of the extension tests that were performed. I'll use the data provided for the test, `WRepMax`.
+
+```{r}
+## Saenz (2010) - Knee isokinetic test-retest - simulation
+## Table 1: Extension
+# We will simulate the test scores provided for WrepMax
+
+# number of subjects
+N <- 90
+
+## Get the mean and SD for the test and retest from Table 1 for WrepMax
+test1_mu <- 99.3
+test1_sd <- 18.34
+test2_mu <- 104.44
+test2_sd <- 24.90
+```
+
+Next, we calculate the mean difference between test 1 and test 2 and grab the standard deviation for the test, provided in Table 3 of the paper.
+
+```{r}
+## Get the difference and standard deviation of the difference between test 1 and 2 from Table 3 (row 1)
+diff <- test1_mu - test2_mu
+sd_diff <- 17.37
+```
+
+
+First, we simulate Test 1 using the above parameters (sample size, mean, and standard deviation).
+
+```{r}
+## Simulate the first test using the summary statistics from Table 1
+set.seed(925)
+w_rep_max_1 <- rnorm(n = N, mean = test1_mu, sd = test1_sd)
+```
+
+
+Next, we simulate Test 2. However, we have to remember consider that, because we are trying to simulate the performance of the 90 participant in the study, Test 2 has a relationship to the performance of Test 1 because the authors' are analyzing the difference in performance between the two tests. Therefore, to create Test 2 we will use our simulation of Test 1 for each participant and include some random error, which is specific to the mean and standard deviation of the difference between Test 1 and Test 2 reported in the study.
+
+
+```{r}
+## Simulate test 2 by taking test 1 and applying the observed difference between tests (Table 3) 
+set.seed(479)
+w_rep_max_2 <- w_rep_max_1 + rnorm(n = N, mean = abs(diff), sd = sd_diff)
+```
+
+Now that we have Test 1 and Test 2 simulated for each participant, we can calculate the summary statistics and see how well they compare to the observed data reported in the study.
+
+```{r}
+## Get the mean and SD of the simulated test1 and test 2
+test1_mu_sim <- mean(w_rep_max_1) 
+test1_sd_sim <- sd(w_rep_max_1)
+
+test2_mu_sim <- mean(w_rep_max_2)
+test2_sd_sim <- sd(w_rep_max_2)
+
+test1_mu_sim
+test1_sd_sim
+
+test2_mu_sim
+test2_sd_sim
+
+## Get the mean and SD of the difference between simulations
+diff_mu_sim <- mean(w_rep_max_1 - w_rep_max_2)
+diff_sd_sim <- sd(w_rep_max_1 - w_rep_max_2)
+
+diff_mu_sim
+diff_sd_sim
+```
+
+
+The results are nearly identical to those presented in the study. Now that we have a simulated data set of all of the participants we can do other things with the data, such as plot it, conduct additional reliability metrics that weren't performed in the study, recreate the analysis in the study to get a better understanding of the analysis that was performed, or perhaps try and model the data in different ways to explore its properties and generate new ideas for future research.
+
+For example, let's run a paired t-test on the simulated data, as the author's did and look at the results in comparison to simulating this study 1000 times. We re-write our `t_test()` function from above to re-simulate the data in the study and then conduct a paired t-test, storing the t-statistic so that we can investigate how often we would reject the null hypothesis.
+
+
+```{r}
+## Run a paired t-test
+t.test(w_rep_max_1, w_rep_max_2, paired = TRUE)
+
+## create a function for the paired t-test and extract the t-statistic
+t_test_retest <- function(){
+  w_rep_max_1 <- rnorm(n = N, mean = test1_mu, sd = test1_sd)
+  w_rep_max_2 <- w_rep_max_1 + rnorm(n = N, mean = abs(diff), sd = sd_diff)
+  t.test(w_rep_max_1, w_rep_max_2, paired = TRUE)$statistic
+}
+
+# Instead of a for loop, we will use the replicate() function to run this 10,000 times
+t_stat_test_retest <- replicate(n = 10000,
+                           t_test_retest())
+
+hist(t_stat_test_retest)
+mean(t_stat_test_retest)
+
+# turn the t-statistics into p-values
+p <- 2*pt(abs(t_stat_test_retest), df = 90 - 2, lower=FALSE)
+
+# histogram of p-values
+hist(p,
+     main = "p-values of all simulated data\nreject the null ~79% of the time")
+
+# what percentage of times did we reject the null at the p < 0.05 level?
+mean(p < 0.05)
+
+```
+
